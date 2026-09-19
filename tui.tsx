@@ -10,14 +10,20 @@
  *    tab store stops tracking when the strip is disabled.
  */
 /** @jsxImportSource @opentui/solid */
-import { createEffect, untrack } from "solid-js"
+import { createEffect, createSignal, onCleanup, untrack } from "solid-js"
+import { RGBA } from "@opentui/core"
 import { existsSync, readFileSync, writeFileSync } from "fs"
 import { homedir } from "os"
 import { join } from "path"
 import { Plugin } from "@opencode/plugin/tui"
 
 const MAX_TABS = 10
-const ICON = { busy: "\u25CF", attention: "\u25B2", idle: "\u25CB" }
+const ICON = { busy: "\u25CF", attention: "\u25B2", idle: "\u25CF" }
+// Busy dots breathe smoothly (cosine curve, ~1.2s cycle) while the agent
+// is responding; static at full brightness when animations are disabled.
+const PULSE_STEPS = 24
+const PULSE_INTERVAL_MS = 50
+const PULSE_MIN = 0.15
 
 type Tab = { sessionID: string; title?: string }
 
@@ -46,10 +52,32 @@ function hideTopTabStrip(): boolean {
   }
 }
 
+// Sidebar inner width is fixed (42 cols minus padding): icon + gaps + the
+// close glyph leave ~33 columns for the title. Clip long titles with a
+// trailing ellipsis instead of relying on the text element's truncator,
+// which cuts head+tail in the middle.
+const TITLE_MAX = 32
+
+function clipTitle(value: string, max: number): string {
+  const chars = Array.from(value)
+  if (chars.length <= max) return value
+  return chars.slice(0, Math.max(0, max - 1)).join("") + "\u2026"
+}
+
+// Dim a theme color (RGBA) for the pulse's low phases; non-RGBA colors are
+// returned untouched so the dot just stays solid.
+function dimColor(color: any, factor: number): any {
+  if (factor >= 1) return color
+  if (color && typeof color === "object" && "r" in color) {
+    return RGBA.fromValues(color.r, color.g, color.b, (color.a ?? 1) * factor)
+  }
+  return color
+}
+
 // Pure helper: status icon + color for one session (mirrors the built-in
 // tab strip logic: busy when the session or any family member is running
 // or has pending work; attention on pending permissions/questions).
-function statusOf(ctx: any, sessionID: string, theme: any) {
+function statusOf(ctx: any, sessionID: string, theme: any, pulse: number, idleColor: any) {
   const family: string[] = ctx.data.session.family(sessionID) ?? [sessionID]
   const busy = family.some(
     (id: string) =>
@@ -62,8 +90,8 @@ function statusOf(ctx: any, sessionID: string, theme: any) {
       ? "question"
       : false
   if (attention) return { char: ICON.attention, fg: theme.text.feedback.warning.base }
-  if (busy) return { char: ICON.busy, fg: theme.hue.accent[200] }
-  return { char: ICON.idle, fg: theme.text.muted }
+  if (busy) return { char: ICON.busy, fg: dimColor(theme.hue.accent[200], pulse) }
+  return { char: ICON.idle, fg: idleColor }
 }
 
 function SessionsBlock(props: any) {
@@ -109,6 +137,24 @@ function SessionsBlock(props: any) {
     })
   })
 
+  // Dot pulse: while the agent is responding the busy dot breathes through
+  // PULSE_STEPS; when done it settles as a plain dot. Honors the
+  // `animations` config (false → static dot).
+  const [phase, setPhase] = createSignal(0)
+  createEffect(() => {
+    const enabled = (ctx.data.animations ?? true) !== false
+    if (!enabled) {
+      setPhase(0)
+      return
+    }
+    const timer = setInterval(() => setPhase((p: number) => (p + 1) % PULSE_STEPS), PULSE_INTERVAL_MS)
+    onCleanup(() => clearInterval(timer))
+  })
+  const busyPulse = () => {
+    const p = phase() / PULSE_STEPS
+    return PULSE_MIN + (1 - PULSE_MIN) * (0.5 + 0.5 * Math.cos(2 * Math.PI * p))
+  }
+
   // Remove a session row ("×"). Closing the active session switches to the
   // next remaining session (or home when the list is empty) — the session
   // itself stays in the history, exactly like the old tab strip's close.
@@ -134,9 +180,16 @@ function SessionsBlock(props: any) {
         <span style={{ fg: theme().text.muted }}> ({entries().length})</span>
       </text>
       {entries().map((entry: Tab) => {
-        const status = statusOf(ctx, entry.sessionID, theme())
+        const status = statusOf(
+          ctx,
+          entry.sessionID,
+          theme(),
+          busyPulse(),
+          activeId() === entry.sessionID ? theme().text.base : theme().text.muted,
+        )
         const title =
           (ctx.data.session.get(entry.sessionID)?.title as string | undefined) ?? entry.title ?? "New session"
+        const shown = clipTitle(title, TITLE_MAX)
         const active = entry.sessionID === activeId()
         return (
           <box flexDirection="row" gap={1} minWidth={0}>
@@ -152,7 +205,7 @@ function SessionsBlock(props: any) {
               minWidth={0}
               onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: entry.sessionID })}
             >
-              {active ? <b>{title}</b> : title}
+              {active ? <b>{shown}</b> : shown}
             </text>
             <text
               fg={theme().text.muted}
