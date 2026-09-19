@@ -27,23 +27,32 @@ const PULSE_MIN = 0.15
 
 type Tab = { sessionID: string; title?: string }
 
-// Returns true when the config file was changed.
-function hideTopTabStrip(): boolean {
-  // Config supplied via env cannot be safely rewritten to disk.
-  if (process.env.OPENCODE_CLI_CONFIG_CONTENT) return false
+// --- Top strip ownership ----------------------------------------------------
+// While the plugin is enabled it owns `tabs.enabled`: setup turns the strip
+// off (remembering the previous value in plugin storage) and the cleanup
+// function returned from setup restores it when the plugin is disabled or
+// unloaded. "never" means the plugin never flipped the value (it was already
+// off — e.g. set manually), so cleanup leaves it alone.
+
+type StripPref = { previous: "never" | "unset" | boolean }
+
+function locateCliJson(): string | undefined {
   const candidates = [
     process.env.XDG_CONFIG_HOME ? join(process.env.XDG_CONFIG_HOME, "opencode", "cli.json") : null,
     join(homedir(), ".config", "opencode", "cli.json"),
   ]
-  const file = candidates.find((f) => f && existsSync(f))
+  return candidates.find((f) => f && existsSync(f))
+}
+
+// Parses cli.json, applies mutate(json); writes the file back when mutate
+// returns true. Returns false when the file is missing or unparsable.
+function modifyCliJson(mutate: (json: any) => boolean): boolean {
+  const file = locateCliJson()
   if (!file) return false
   try {
     const json = JSON.parse(readFileSync(file, "utf8"))
     if (!json || typeof json !== "object") return false
-    const tabs = { ...(json.tabs ?? {}) }
-    if (tabs.enabled === false) return false
-    tabs.enabled = false
-    json.tabs = tabs
+    if (!mutate(json)) return false
     writeFileSync(file, JSON.stringify(json, null, 2) + "\n")
     return true
   } catch {
@@ -224,17 +233,50 @@ function SessionsBlock(props: any) {
 export default Plugin.define({
   id: "sessions-sidebar",
   setup(context) {
-    if (hideTopTabStrip()) {
-      context.ui.toast.show({
-        title: "Sessions sidebar",
-        message: "Top tab strip disabled — sessions now live at the bottom of the sidebar.",
-        variant: "info",
-        duration: 4000,
+    // Own the top strip: disable it and remember the previous value so the
+    // cleanup (returned below) can put it back when the plugin is disabled.
+    const [prefStore, setPref] = context.storage.store("strip-pref", { initial: { previous: "never" as StripPref["previous"] } })
+    let prefWrite: Promise<unknown> | undefined
+    if (!process.env.OPENCODE_CLI_CONFIG_CONTENT) {
+      modifyCliJson((json) => {
+        const current = json.tabs?.enabled
+        if (current === false) {
+          // Already off. Bootstrap the preference when this plugin wrote that
+          // value in an earlier version and never stored it.
+          if ((prefStore as any).previous === "never") {
+            prefWrite = setPref((draft: StripPref) => {
+              draft.previous = "unset"
+            })
+          }
+          return false
+        }
+        const previous = typeof current === "boolean" ? current : "unset"
+        prefWrite = setPref((draft: StripPref) => {
+          draft.previous = previous
+        })
+        json.tabs = { ...(json.tabs ?? {}), enabled: false }
+        return true
+      })
+    }
+    const restoreStrip = async () => {
+      if (process.env.OPENCODE_CLI_CONFIG_CONTENT) return
+      try {
+        await prefWrite
+      } catch {}
+      const previous = (prefStore as any).previous
+      if (previous === "never" || previous === undefined) return // plugin never flipped it
+      modifyCliJson((json) => {
+        const tabs = { ...(json.tabs ?? {}) }
+        if (previous === "unset") delete tabs.enabled
+        else tabs.enabled = previous
+        json.tabs = tabs
+        return true
       })
     }
     context.ui.slot({
       append: "sidebar.content",
       render: () => <SessionsBlock context={context} />,
     })
+    return restoreStrip
   },
 })
