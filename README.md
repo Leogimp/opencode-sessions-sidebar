@@ -17,6 +17,8 @@
 
 <a href="https://www.buymeacoffee.com/leogimpel"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-000000?style=for-the-badge&logo=buymeacoffee&logoColor=white" alt="Buy Me A Coffee" /></a>
 
+<img src="assets/sidebar.png" alt="Sessions block in the opencode TUI sidebar" />
+
 </div>
 
 ## Install
@@ -49,8 +51,6 @@ above the built-in footer directory indicator:
   never shuffle while you work
 - Session titles persist in the plugin's store, so they survive data eviction
 
-![sessions sidebar](assets/sidebar.png)
-
 ### Status indicators
 
 Each row's icon mirrors the built-in tab strip logic, across the session and its whole
@@ -65,12 +65,20 @@ subagent family:
 ### Tab strip ownership
 
 While the plugin is enabled it hides the built-in top tab strip by setting
-`tabs.enabled: false` in `~/.config/opencode/cli.json` (session tracking moves into the
+`tabs.enabled: false` in `cli.json` (session tracking moves into the
 plugin, because the built-in tab store stops tracking once the strip is disabled):
 
 - The previous value is remembered in plugin storage
+- While the plugin is running it **keeps re-asserting** `tabs.enabled: false` by
+  watching the config file - plugin cleanup also runs when any OpenCode window
+  exits, which would otherwise re-enable the strip in every window that is
+  still open
 - Disabling or removing the plugin **restores the strip** automatically - if the strip
   was already off before installing, it is left untouched
+- `cli.json` is resolved like OpenCode does (`OPENCODE_CONFIG_DIR`, then
+  `XDG_CONFIG_HOME`, then `~/.config/opencode`) and is created when missing;
+  writes are atomic (temp + rename). If the file cannot be parsed (e.g. JSONC
+  comments), a toast asks you to hide the strip manually
 
 ## Notes
 
