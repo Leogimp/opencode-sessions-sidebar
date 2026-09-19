@@ -1,0 +1,146 @@
+/**
+ * TUI plugin:
+ * 1. Renders open sessions as a "Sessions" block at the bottom of the
+ *    sidebar content area (sidebar.content). The sidebar.footer directory
+ *    indicator stays below it. Rows: status icon + title, active session
+ *    highlighted; click a row to switch to that session.
+ * 2. Hides the built-in top tab strip by setting cli.json
+ *    `tabs.enabled: false` (once, when the value differs). Session tracking
+ *    and navigation are handled by this plugin itself, because the built-in
+ *    tab store stops tracking when the strip is disabled.
+ */
+/** @jsxImportSource @opentui/solid */
+import { createEffect } from "solid-js"
+import { existsSync, readFileSync, writeFileSync } from "fs"
+import { homedir } from "os"
+import { join } from "path"
+import { Plugin } from "@opencode/plugin/tui"
+
+const MAX_TABS = 10
+const ICON = { busy: "\u25CF", attention: "\u25B2", idle: "\u25CB" }
+
+type Tab = { sessionID: string; title?: string }
+
+// Returns true when the config file was changed.
+function hideTopTabStrip(): boolean {
+  // Config supplied via env cannot be safely rewritten to disk.
+  if (process.env.OPENCODE_CLI_CONFIG_CONTENT) return false
+  const candidates = [
+    process.env.XDG_CONFIG_HOME ? join(process.env.XDG_CONFIG_HOME, "opencode", "cli.json") : null,
+    join(homedir(), ".config", "opencode", "cli.json"),
+  ]
+  const file = candidates.find((f) => f && existsSync(f))
+  if (!file) return false
+  try {
+    const json = JSON.parse(readFileSync(file, "utf8"))
+    if (!json || typeof json !== "object") return false
+    const tabs = { ...(json.tabs ?? {}) }
+    if (tabs.enabled === false) return false
+    tabs.enabled = false
+    json.tabs = tabs
+    writeFileSync(file, JSON.stringify(json, null, 2) + "\n")
+    return true
+  } catch {
+    // Unparsable or unexpected config; leave it alone.
+    return false
+  }
+}
+
+// Pure helper: status icon + color for one session (mirrors the built-in
+// tab strip logic: busy when the session or any family member is running
+// or has pending work; attention on pending permissions/questions).
+function statusOf(ctx: any, sessionID: string, theme: any) {
+  const family: string[] = ctx.data.session.family(sessionID) ?? [sessionID]
+  const busy = family.some(
+    (id: string) =>
+      ctx.data.session.status(id) === "running" ||
+      (ctx.data.session.pending.list(id) ?? []).some((p: any) => p.type !== "synthetic"),
+  )
+  const attention = family.some((id: string) => (ctx.data.session.permission.list(id)?.length ?? 0) > 0)
+    ? "permission"
+    : family.some((id: string) => (ctx.data.session.form.list(id)?.length ?? 0) > 0)
+      ? "question"
+      : false
+  if (attention) return { char: ICON.attention, fg: theme.text.feedback.warning.base }
+  if (busy) return { char: ICON.busy, fg: theme.hue.accent[200] }
+  return { char: ICON.idle, fg: theme.text.muted }
+}
+
+function SessionsBlock(props: any) {
+  const ctx = props.context
+  const theme = () => ctx.theme
+  // storage.store() returns [storeObject, updateFn] — read via property
+  // access on the store object, write via the updater.
+  const [tabStore, setStore] = ctx.storage.store("tabs", { initial: { sessions: [] } })
+  const entries = () => (tabStore.sessions ?? []) as Tab[]
+  const route = () => ctx.ui.router.current()
+  const activeId = () => (route()?.type === "session" ? (ctx.data.session.root(route()!.sessionID) as string) : undefined)
+
+  // Track session navigation: most recently opened session moves to the
+  // bottom of the list, so the active session is the last row.
+  createEffect(() => {
+    const r = route()
+    if (!r || r.type !== "session") return
+    const root = ctx.data.session.root(r.sessionID) as string
+    const title = ctx.data.session.get(root)?.title as string | undefined
+    const list = entries()
+    const last = list[list.length - 1]
+    if (last?.sessionID === root && (last.title || !title)) return
+    setStore((draft: any) => {
+      const rest = (draft.sessions ?? []).filter((t: Tab) => t.sessionID !== root)
+      draft.sessions = [...rest.slice(-(MAX_TABS - 1)), { sessionID: root, title }]
+    })
+  })
+
+  return (
+    <box flexDirection="column" gap={1}>
+      <text fg={theme().text.base}>
+        <b>Sessions</b>
+        <span style={{ fg: theme().text.muted }}> ({entries().length})</span>
+      </text>
+      {entries().map((entry: Tab) => {
+        const status = statusOf(ctx, entry.sessionID, theme())
+        const title =
+          (ctx.data.session.get(entry.sessionID)?.title as string | undefined) ?? entry.title ?? "New session"
+        const active = entry.sessionID === activeId()
+        return (
+          <box
+            flexDirection="row"
+            minWidth={0}
+            onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: entry.sessionID })}
+          >
+            <text wrapMode="none" truncate={true} minWidth={0} flexGrow={1}>
+              <span style={{ fg: status.fg }}>{status.char}</span>
+              {"  "}
+              {active ? (
+                <span style={{ fg: theme().text.base }}>
+                  <b>{title}</b>
+                </span>
+              ) : (
+                <span style={{ fg: theme().text.muted }}>{title}</span>
+              )}
+            </text>
+          </box>
+        )
+      })}
+    </box>
+  )
+}
+
+export default Plugin.define({
+  id: "sessions-sidebar",
+  setup(context) {
+    if (hideTopTabStrip()) {
+      context.ui.toast.show({
+        title: "Sessions sidebar",
+        message: "Top tab strip disabled — sessions now live at the bottom of the sidebar.",
+        variant: "info",
+        duration: 4000,
+      })
+    }
+    context.ui.slot({
+      append: "sidebar.content",
+      render: () => <SessionsBlock context={context} />,
+    })
+  },
+})

@@ -1,0 +1,10 @@
+{
+  "name": "opencode-sessions-sidebar",
+  "version": "1.0.0",
+  "description": "Renders open session tabs as a Sessions block at the bottom of the OpenCode sidebar",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx"
+  }
+}
