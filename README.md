@@ -10,7 +10,7 @@
 
 <br />
 
-<img src="https://img.shields.io/badge/opencode-1.18%2B-000000?style=for-the-badge&logo=opencode&logoColor=white" alt="opencode 1.18+" />
+<img src="https://img.shields.io/badge/opencode-2.0.0-000000?style=for-the-badge&logo=opencode&logoColor=white" alt="opencode 2.0.0" />
 <img src="https://img.shields.io/badge/License-MIT-000000?style=for-the-badge&logo=open-source-initiative&logoColor=white" alt="MIT License" />
 
 <br />
@@ -98,7 +98,7 @@ every change - TUI plugins are only loaded at startup.
 
 ## Requirements
 
-- opencode **1.18+** (uses the TUI plugin slot API)
+- opencode **2.0.0+** (uses the TUI plugin slot API)
 
 ## License
 
