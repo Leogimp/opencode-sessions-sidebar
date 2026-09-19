@@ -109,6 +109,24 @@ function SessionsBlock(props: any) {
     })
   })
 
+  // Remove a session row ("×"). Closing the active session switches to the
+  // next remaining session (or home when the list is empty) — the session
+  // itself stays in the history, exactly like the old tab strip's close.
+  const closeSession = (id: string) => {
+    const list = entries()
+    const idx = list.findIndex((t: Tab) => t.sessionID === id)
+    if (idx === -1) return
+    setStore((draft: any) => {
+      draft.sessions = (draft.sessions ?? []).filter((t: Tab) => t.sessionID !== id)
+    })
+    if (id === activeId()) {
+      const remaining = list.filter((t: Tab) => t.sessionID !== id)
+      const next = remaining[idx] ?? remaining[idx - 1]
+      if (next) ctx.ui.router.navigate({ type: "session", sessionID: next.sessionID })
+      else ctx.ui.router.navigate({ type: "home" })
+    }
+  }
+
   return (
     <box flexDirection="column" gap={1}>
       <text fg={theme().text.base}>
@@ -121,12 +139,7 @@ function SessionsBlock(props: any) {
           (ctx.data.session.get(entry.sessionID)?.title as string | undefined) ?? entry.title ?? "New session"
         const active = entry.sessionID === activeId()
         return (
-          <box
-            flexDirection="row"
-            gap={1}
-            minWidth={0}
-            onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: entry.sessionID })}
-          >
+          <box flexDirection="row" gap={1} minWidth={0}>
             <text fg={status.fg} flexShrink={0}>
               {status.char}
             </text>
@@ -137,8 +150,16 @@ function SessionsBlock(props: any) {
               flexGrow={1}
               flexShrink={1}
               minWidth={0}
+              onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: entry.sessionID })}
             >
               {active ? <b>{title}</b> : title}
+            </text>
+            <text
+              fg={theme().text.muted}
+              flexShrink={0}
+              onMouseUp={() => closeSession(entry.sessionID)}
+            >
+              {"\u00D7"}
             </text>
           </box>
         )
