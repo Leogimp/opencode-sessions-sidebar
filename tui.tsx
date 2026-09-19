@@ -10,7 +10,7 @@
  *    tab store stops tracking when the strip is disabled.
  */
 /** @jsxImportSource @opentui/solid */
-import { createEffect } from "solid-js"
+import { createEffect, untrack } from "solid-js"
 import { existsSync, readFileSync, writeFileSync } from "fs"
 import { homedir } from "os"
 import { join } from "path"
@@ -76,19 +76,36 @@ function SessionsBlock(props: any) {
   const route = () => ctx.ui.router.current()
   const activeId = () => (route()?.type === "session" ? (ctx.data.session.root(route()!.sessionID) as string) : undefined)
 
-  // Track session navigation: most recently opened session moves to the
-  // bottom of the list, so the active session is the last row.
+  // Capture navigation once per route change. Tracking is append-only: a
+  // session keeps its row position once opened, so rows never shuffle.
+  // Newest session lands at the bottom.
   createEffect(() => {
     const r = route()
     if (!r || r.type !== "session") return
-    const root = ctx.data.session.root(r.sessionID) as string
-    const title = ctx.data.session.get(root)?.title as string | undefined
-    const list = entries()
-    const last = list[list.length - 1]
-    if (last?.sessionID === root && (last.title || !title)) return
-    setStore((draft: any) => {
-      const rest = (draft.sessions ?? []).filter((t: Tab) => t.sessionID !== root)
-      draft.sessions = [...rest.slice(-(MAX_TABS - 1)), { sessionID: root, title }]
+    untrack(() => {
+      const root = ctx.data.session.root(r.sessionID) as string
+      if (entries().some((t: Tab) => t.sessionID === root)) return
+      const title = ctx.data.session.get(root)?.title as string | undefined
+      setStore((draft: any) => {
+        const rest = (draft.sessions ?? []).slice(-(MAX_TABS - 1))
+        draft.sessions = [...rest, { sessionID: root, title }]
+      })
+    })
+  })
+
+  // Refresh the stored title of the active session in place (used as
+  // fallback once session data is evicted). Order never changes here.
+  createEffect(() => {
+    const id = activeId()
+    if (!id) return
+    const title = ctx.data.session.get(id)?.title as string | undefined
+    untrack(() => {
+      const entry = entries().find((t: Tab) => t.sessionID === id)
+      if (!entry || (entry.title ?? undefined) === (title ?? undefined)) return
+      setStore((draft: any) => {
+        const d = (draft.sessions ?? []).find((t: Tab) => t.sessionID === id)
+        if (d) d.title = title
+      })
     })
   })
 
@@ -106,19 +123,22 @@ function SessionsBlock(props: any) {
         return (
           <box
             flexDirection="row"
+            gap={1}
             minWidth={0}
             onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: entry.sessionID })}
           >
-            <text wrapMode="none" truncate={true} minWidth={0} flexGrow={1}>
-              <span style={{ fg: status.fg }}>{status.char}</span>
-              {"  "}
-              {active ? (
-                <span style={{ fg: theme().text.base }}>
-                  <b>{title}</b>
-                </span>
-              ) : (
-                <span style={{ fg: theme().text.muted }}>{title}</span>
-              )}
+            <text fg={status.fg} flexShrink={0}>
+              {status.char}
+            </text>
+            <text
+              fg={active ? theme().text.base : theme().text.muted}
+              attributes={active ? { bold: true } : undefined}
+              wrapMode="none"
+              flexGrow={1}
+              flexShrink={1}
+              minWidth={0}
+            >
+              {active ? <b>{title}</b> : title}
             </text>
           </box>
         )
