@@ -4,17 +4,29 @@
  *    sidebar content area (sidebar.content). The sidebar.footer directory
  *    indicator stays below it. Rows: status icon + title, active session
  *    highlighted; click a row to switch to that session.
- * 2. Hides the built-in top tab strip by setting cli.json
- *    `tabs.enabled: false` (once, when the value differs). Session tracking
- *    and navigation are handled by this plugin itself, because the built-in
- *    tab store stops tracking when the strip is disabled.
+ * 2. Owns the built-in top tab strip: setup sets cli.json `tabs.enabled:
+ *    false`, keeps re-asserting that value while the plugin is active
+ *    (another OpenCode window exiting restores it — plugin cleanup runs on
+ *    every TUI shutdown — and the settings dialog can re-enable it), and the
+ *    cleanup returned from setup restores the previous value when the plugin
+ *    is disabled. Session tracking and navigation are handled by this plugin
+ *    itself, because the built-in tab store stops tracking when the strip is
+ *    disabled.
  */
 /** @jsxImportSource @opentui/solid */
 import { createEffect, createSignal, onCleanup, untrack } from "solid-js"
 import { RGBA } from "@opentui/core"
-import { existsSync, readFileSync, writeFileSync } from "fs"
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  watch,
+  writeFileSync,
+} from "fs"
+import { basename, dirname, join } from "path"
 import { homedir } from "os"
-import { join } from "path"
 import { Plugin } from "@opencode/plugin/tui"
 
 const MAX_TABS = 10
@@ -36,28 +48,52 @@ type Tab = { sessionID: string; title?: string }
 
 type StripPref = { previous: "never" | "unset" | boolean }
 
-function locateCliJson(): string | undefined {
-  const candidates = [
-    process.env.XDG_CONFIG_HOME ? join(process.env.XDG_CONFIG_HOME, "opencode", "cli.json") : null,
-    join(homedir(), ".config", "opencode", "cli.json"),
-  ]
-  return candidates.find((f) => f && existsSync(f))
+// Resolves cli.json the way OpenCode does: $OPENCODE_CONFIG_DIR wins, then
+// $XDG_CONFIG_HOME/opencode, then ~/.config/opencode. The file may not exist
+// yet — setup creates it.
+function locateCliJson(): string {
+  const root =
+    process.env.OPENCODE_CONFIG_DIR ??
+    (process.env.XDG_CONFIG_HOME
+      ? join(process.env.XDG_CONFIG_HOME, "opencode")
+      : join(homedir(), ".config", "opencode"))
+  return join(root, "cli.json")
 }
 
-// Parses cli.json, applies mutate(json); writes the file back when mutate
-// returns true. Returns false when the file is missing or unparsable.
-function modifyCliJson(mutate: (json: any) => boolean): boolean {
+// Atomic replacement (temp + rename) so concurrent readers — every OpenCode
+// window watches cli.json — never see a half-written file.
+function writeJsonAtomic(file: string, text: string): void {
+  const temp = `${file}.${process.pid}.tmp`
+  try {
+    writeFileSync(temp, text)
+    renameSync(temp, file)
+  } catch {
+    try {
+      writeFileSync(file, text)
+    } finally {
+      try {
+        unlinkSync(temp)
+      } catch {}
+    }
+  }
+}
+
+type ModifyResult = "written" | "unchanged" | "missing" | "unparsable"
+
+// Parses cli.json, applies mutate(json); writes the file back (atomically)
+// when mutate returns true. Never throws.
+function modifyCliJson(mutate: (json: any) => boolean): ModifyResult {
   const file = locateCliJson()
-  if (!file) return false
+  if (!existsSync(file)) return "missing"
   try {
     const json = JSON.parse(readFileSync(file, "utf8"))
-    if (!json || typeof json !== "object") return false
-    if (!mutate(json)) return false
-    writeFileSync(file, JSON.stringify(json, null, 2) + "\n")
-    return true
+    if (!json || typeof json !== "object") return "unparsable"
+    if (!mutate(json)) return "unchanged"
+    writeJsonAtomic(file, JSON.stringify(json, null, 2) + "\n")
+    return "written"
   } catch {
-    // Unparsable or unexpected config; leave it alone.
-    return false
+    // Unparsable (e.g. JSONC comments) or unexpected config; leave it alone.
+    return "unparsable"
   }
 }
 
@@ -235,15 +271,33 @@ export default Plugin.define({
   setup(context) {
     // Own the top strip: disable it and remember the previous value so the
     // cleanup (returned below) can put it back when the plugin is disabled.
-    const [prefStore, setPref] = context.storage.store("strip-pref", { initial: { previous: "never" as StripPref["previous"] } })
+    const [prefStore, setPref] = context.storage.store("strip-pref", {
+      initial: { previous: "never" as StripPref["previous"] },
+    })
     let prefWrite: Promise<unknown> | undefined
-    if (!process.env.OPENCODE_CLI_CONFIG_CONTENT) {
-      modifyCliJson((json) => {
+    // True while this activation owns the strip: setup flipped
+    // `tabs.enabled` (or claimed an already-off value written by an earlier
+    // version) and the watcher below keeps it off.
+    let owns = false
+    let active = true
+    let watcher: ReturnType<typeof watch> | undefined
+    let assertTimer: ReturnType<typeof setTimeout> | undefined
+
+    if (process.env.OPENCODE_CLI_CONFIG_CONTENT) {
+      // Config supplied inline overrides the file, so editing it is futile.
+      context.ui.toast.show({
+        title: "Sessions sidebar",
+        message: "Config supplied inline — the built-in tab strip cannot be hidden automatically.",
+        variant: "warning",
+      })
+    } else {
+      const result = modifyCliJson((json) => {
         const current = json.tabs?.enabled
         if (current === false) {
           // Already off. Bootstrap the preference when this plugin wrote that
           // value in an earlier version and never stored it.
           if ((prefStore as any).previous === "never") {
+            owns = true
             prefWrite = setPref((draft: StripPref) => {
               draft.previous = "unset"
             })
@@ -251,14 +305,64 @@ export default Plugin.define({
           return false
         }
         const previous = typeof current === "boolean" ? current : "unset"
+        owns = true
         prefWrite = setPref((draft: StripPref) => {
           draft.previous = previous
         })
         json.tabs = { ...(json.tabs ?? {}), enabled: false }
         return true
       })
+      if (result === "missing") {
+        // Fresh setup: create a minimal cli.json so the strip can be hidden.
+        try {
+          const file = locateCliJson()
+          mkdirSync(dirname(file), { recursive: true })
+          writeJsonAtomic(
+            file,
+            JSON.stringify({ $schema: "https://opencode.ai/v2/cli.json", tabs: { enabled: false } }, null, 2) + "\n",
+          )
+          owns = true
+          prefWrite = setPref((draft: StripPref) => {
+            draft.previous = "unset"
+          })
+        } catch {}
+      } else if (result === "unparsable") {
+        context.ui.toast.show({
+          title: "Sessions sidebar",
+          message: "Could not parse cli.json — hide the tab strip manually with tabs.enabled: false.",
+          variant: "warning",
+        })
+      }
+
+      // Keep owning the strip while active. Plugin cleanup also runs on TUI
+      // shutdown, so every other OpenCode window sees `tabs.enabled` restored
+      // when one window exits — and every running TUI watches cli.json, so
+      // re-writing the value re-hides the strip everywhere within ~150 ms.
+      if (owns) {
+        try {
+          watcher = watch(dirname(locateCliJson()), { persistent: false }, (_event, name) => {
+            if (name && basename(name).toLowerCase() !== "cli.json") return
+            if (!active || !owns) return
+            clearTimeout(assertTimer)
+            assertTimer = setTimeout(() => {
+              if (!active || !owns) return
+              modifyCliJson((json) => {
+                const current = json.tabs?.enabled
+                if (current === false) return false
+                json.tabs = { ...(json.tabs ?? {}), enabled: false }
+                return true
+              })
+            }, 150)
+          })
+        } catch {}
+      }
     }
+
     const restoreStrip = async () => {
+      active = false
+      clearTimeout(assertTimer)
+      watcher?.close()
+      watcher = undefined
       if (process.env.OPENCODE_CLI_CONFIG_CONTENT) return
       try {
         await prefWrite
@@ -269,7 +373,8 @@ export default Plugin.define({
         const tabs = { ...(json.tabs ?? {}) }
         if (previous === "unset") delete tabs.enabled
         else tabs.enabled = previous
-        json.tabs = tabs
+        if (Object.keys(tabs).length === 0) delete json.tabs
+        else json.tabs = tabs
         return true
       })
     }
