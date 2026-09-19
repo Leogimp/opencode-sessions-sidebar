@@ -17,8 +17,6 @@
 
 <a href="https://www.buymeacoffee.com/leogimpel"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-000000?style=for-the-badge&logo=buymeacoffee&logoColor=white" alt="Buy Me A Coffee" /></a>
 
-<img src="assets/sidebar.png" alt="Sessions block in the opencode TUI sidebar" />
-
 </div>
 
 ## Install
@@ -37,6 +35,12 @@ Then quit and restart opencode - TUI config is only read at startup.
 To uninstall, remove the entry from `tui.json`. On the next start the plugin's cleanup runs once more and restores the built-in tab strip.
 
 ## Features
+
+<div align="center">
+
+<img src="assets/sidebar.png" alt="Sessions block in the opencode TUI sidebar" width="400" />
+
+</div>
 
 ### Sessions block
 
