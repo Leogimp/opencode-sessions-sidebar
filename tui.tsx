@@ -219,23 +219,21 @@ function SessionsBlock(props: any) {
     }
   }
 
-  // "+" row: create a session on the server, track it like an opened
-  // session (respecting MAX_TABS), then switch to it. In-flight guard
-  // keeps a double-click from creating two sessions.
+  // "+" row: create a session on the server, then switch to it. No manual
+  // store write here — the route-tracking effect appends every session the
+  // router navigates to, and writing the store separately races with that
+  // (plus the cross-window storage sync), producing duplicate rows. The
+  // in-flight guard keeps a double-click from creating two sessions.
   let creating = false
   const createSession = async () => {
     if (creating) return
     creating = true
     try {
       const result: any = await ctx.client.session.create({ title: "New session" })
-      const sessionID = ctx.data.session.root(result?.data?.id ?? result?.id) as string
-      untrack(() => {
-        if (entries().some((t: Tab) => t.sessionID === sessionID)) return
-        setStore((draft: any) => {
-          const rest = (draft.sessions ?? []).slice(-(MAX_TABS - 1))
-          draft.sessions = [...rest, { sessionID, title: "New session" }]
-        })
-      })
+      const id = (result?.data?.id ?? result?.id) as string | undefined
+      if (!id) throw new Error("server returned no session id")
+      // root() can be undefined until the data layer syncs the new session.
+      const sessionID = ((ctx.data.session.root(id) as string | undefined) ?? id)
       ctx.ui.router.navigate({ type: "session", sessionID })
     } catch (error) {
       ctx.ui.toast.show({
