@@ -3,7 +3,8 @@
  * 1. Renders open sessions as a "Sessions" block at the bottom of the
  *    sidebar content area (sidebar.content). The sidebar.footer directory
  *    indicator stays below it. Rows: status icon + title, active session
- *    highlighted; click a row to switch to that session.
+ *    highlighted; click a row to switch to that session. A centered "+" row
+ *    below the list creates a new session and switches to it.
  * 2. Owns the built-in top tab strip: setup sets cli.json `tabs.enabled:
  *    false`, keeps re-asserting that value while the plugin is active
  *    (another OpenCode window exiting restores it — plugin cleanup runs on
@@ -218,6 +219,35 @@ function SessionsBlock(props: any) {
     }
   }
 
+  // "+" row: create a session on the server, track it like an opened
+  // session (respecting MAX_TABS), then switch to it. In-flight guard
+  // keeps a double-click from creating two sessions.
+  let creating = false
+  const createSession = async () => {
+    if (creating) return
+    creating = true
+    try {
+      const result: any = await ctx.client.session.create({ title: "New session" })
+      const sessionID = ctx.data.session.root(result?.data?.id ?? result?.id) as string
+      untrack(() => {
+        if (entries().some((t: Tab) => t.sessionID === sessionID)) return
+        setStore((draft: any) => {
+          const rest = (draft.sessions ?? []).slice(-(MAX_TABS - 1))
+          draft.sessions = [...rest, { sessionID, title: "New session" }]
+        })
+      })
+      ctx.ui.router.navigate({ type: "session", sessionID })
+    } catch (error) {
+      ctx.ui.toast.show({
+        title: "Sessions sidebar",
+        message: `Could not create session: ${error instanceof Error ? error.message : String(error)}`,
+        variant: "warning",
+      })
+    } finally {
+      creating = false
+    }
+  }
+
   return (
     <box flexDirection="column" gap={1}>
       <text fg={theme().text.base}>
@@ -262,6 +292,14 @@ function SessionsBlock(props: any) {
           </box>
         )
       })}
+      <box flexDirection="row" justifyContent="center">
+        <text
+          fg={theme().text.muted}
+          onMouseUp={() => void createSession()}
+        >
+          {"+"}
+        </text>
+      </box>
     </box>
   )
 }
