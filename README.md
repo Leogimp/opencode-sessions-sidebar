@@ -137,10 +137,15 @@ plugin, because the built-in tab store stops tracking once the strip is disabled
 - `index.ts` is a deliberate no-op so the server-side plugin loader resolves the
   package cleanly without pulling TUI-only dependencies into the server module
   map - all rendering lives in `tui.tsx`, which is what the `./tui` export loads.
-- `@opencode/plugin`, `solid-js`, `@opentui/core` and `@opentui/solid` are declared
-  as real dependencies so the bare specifiers resolve inside OpenCode's plugin
-  install cache. `solid-js` tracks the version `@opentui/solid` is built against
-  rather than the stale exact pin, which avoids shipping a second copy of it.
+- `@opencode/plugin`, `@opentui/core` and `solid-js` are declared as real
+  dependencies so the bare specifiers resolve inside OpenCode's plugin install
+  cache. `@opentui/solid` is a dev dependency: `tui.tsx` only references it as
+  a `@jsxImportSource` pragma, and the host supplies the JSX runtime at runtime.
+- `solid-js` tracks `^1.9.15` - what the OpenCode TUI is built against - rather
+  than the exact `1.9.12` that `@opentui/solid` still peers on, which would
+  pull a `seroval` with four unfixed critical advisories. npm is strict about
+  that stale peer, so the repo ships a `.npmrc` that relaxes it; OpenCode
+  installs plugins with Bun, which does not care.
 
 ## Requirements
 
