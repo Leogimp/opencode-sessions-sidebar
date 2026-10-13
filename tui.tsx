@@ -137,6 +137,31 @@ function modifyCliJson(mutate: (json: any) => boolean): ModifyResult {
   }
 }
 
+// The busy-dot pulse honours the global `animations` setting. There is no
+// context API for it — `Data` has no such field — so read it from the same
+// cli.json the plugin already resolves, preferring inline config when the
+// host supplied any. Unknown/absent/unreadable means "leave it on", which
+// matches OpenCode's own default. Never throws.
+function readAnimations(): boolean {
+  let text = process.env.OPENCODE_CLI_CONFIG_CONTENT
+  if (text === undefined) {
+    try {
+      const file = locateCliJson()
+      if (existsSync(file)) text = readFileSync(file, "utf8")
+    } catch {
+      return true
+    }
+  }
+  if (text === undefined) return true
+  try {
+    const json = JSON.parse(text)
+    if (!json || typeof json !== "object") return true
+    return json.animations !== false
+  } catch {
+    return true
+  }
+}
+
 // Sidebar inner width is fixed (42 cols minus padding): icon + gaps + the
 // close glyph leave ~33 columns for the title. Clip long titles with a
 // trailing ellipsis instead of relying on the text element's truncator,
@@ -223,12 +248,12 @@ function SessionsBlock(props: any) {
   })
 
   // Dot pulse: while the agent is responding the busy dot breathes through
-  // PULSE_STEPS; when done it settles as a plain dot. Honors the
-  // `animations` config (false → static dot).
+  // PULSE_STEPS; when done it settles as a plain dot. Respects the global
+  // `animations` setting from cli.json, read once in setup (false → static
+  // dot).
   const [phase, setPhase] = createSignal(0)
   createEffect(() => {
-    const enabled = (ctx.data.animations ?? true) !== false
-    if (!enabled) {
+    if (props.animations === false) {
       setPhase(0)
       return
     }
@@ -437,9 +462,10 @@ export default Plugin.define({
     // ui.slot() returns a disposer. It has to be captured and called on
     // cleanup, otherwise the Sessions block stays mounted after the plugin is
     // disabled.
+    const animations = readAnimations()
     const disposeSlot = context.ui.slot({
       append: "sidebar.content",
-      render: () => <SessionsBlock context={context} />,
+      render: () => <SessionsBlock context={context} animations={animations} />,
     })
 
     const restoreStrip = async () => {
