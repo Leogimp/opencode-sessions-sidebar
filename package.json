@@ -2,10 +2,40 @@
   "name": "@leogimp/opencode-sessions-sidebar",
   "version": "1.0.0",
   "description": "Renders open session tabs as a Sessions block at the bottom of the OpenCode sidebar",
+  "license": "MIT",
+  "author": {
+    "name": "Leogimp",
+    "url": "https://github.com/Leogimp"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Leogimp/opencode-sessions-sidebar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Leogimp/opencode-sessions-sidebar/issues"
+  },
+  "homepage": "https://github.com/Leogimp/opencode-sessions-sidebar#readme",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "tui",
+    "tui-plugin",
+    "sessions",
+    "sidebar",
+    "tabs",
+    "solidjs"
+  ],
   "type": "module",
   "exports": {
     ".": "./index.ts",
     "./tui": "./tui.tsx"
+  },
+  "files": [
+    "index.ts",
+    "tui.tsx"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@opencode/plugin": "^2.0.10",
