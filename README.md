@@ -1,4 +1,4 @@
-# @leogimp/opencode-sessions-sidebar
+# @leo.gimp/opencode-sessions-sidebar
 
 [OpenCode](https://opencode.ai) v2 TUI plugin that renders open sessions as a **Sessions** block at the bottom of the sidebar - click a row to switch sessions, `×` to close one - and replaces the built-in top tab strip. Fully reversible: disabling the plugin unmounts the block and gives you your tab strip back.
 
@@ -26,7 +26,7 @@ This is a TUI (CLI-only) plugin, so it belongs in **`cli.json`** under the **`pl
 ### From npm (recommended)
 
 ```bash
-opencode plugin add @leogimp/opencode-sessions-sidebar
+opencode plugin add @leo.gimp/opencode-sessions-sidebar
 ```
 
 Or add it by hand to `~/.config/opencode/cli.json`:
@@ -34,12 +34,12 @@ Or add it by hand to `~/.config/opencode/cli.json`:
 ```json
 {
   "$schema": "https://opencode.ai/v2/cli.json",
-  "plugins": ["@leogimp/opencode-sessions-sidebar"]
+  "plugins": ["@leo.gimp/opencode-sessions-sidebar"]
 }
 ```
 
 > [!IMPORTANT]
-> The npm package is **scoped to `@leogimp`**. The unscoped `opencode-sessions-sidebar` name on npm belongs to a different, unrelated plugin by another author - installing that name gets you their plugin, not this one.
+> The npm package is **scoped to `@leo.gimp`**. The unscoped `opencode-sessions-sidebar` name on npm belongs to a different, unrelated plugin by another author - installing that name gets you their plugin, not this one.
 
 ### From source
 
@@ -57,7 +57,7 @@ Relative paths (`./plugins/sessions-sidebar`), `file://` URLs, and dropping the 
 ### Uninstall
 
 ```bash
-opencode plugin remove @leogimp/opencode-sessions-sidebar
+opencode plugin remove @leo.gimp/opencode-sessions-sidebar
 ```
 
 Or delete the entry from `cli.json`. Either way the cleanup runs, the Sessions block is unmounted, and the built-in tab strip is restored.
