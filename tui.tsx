@@ -394,8 +394,17 @@ export default Plugin.define({
       }
     }
 
+    // ui.slot() returns a disposer. It has to be captured and called on
+    // cleanup, otherwise the Sessions block stays mounted after the plugin is
+    // disabled.
+    const disposeSlot = context.ui.slot({
+      append: "sidebar.content",
+      render: () => <SessionsBlock context={context} />,
+    })
+
     const restoreStrip = async () => {
       active = false
+      disposeSlot()
       clearTimeout(assertTimer)
       watcher?.close()
       watcher = undefined
@@ -414,10 +423,6 @@ export default Plugin.define({
         return true
       })
     }
-    context.ui.slot({
-      append: "sidebar.content",
-      render: () => <SessionsBlock context={context} />,
-    })
     return restoreStrip
   },
 })
