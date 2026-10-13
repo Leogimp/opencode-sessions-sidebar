@@ -56,7 +56,8 @@ jobs:
             const { execSync } = require("child_process");
             const { createHash } = require("crypto");
             const { readFileSync, appendFileSync } = require("fs");
-            const packed = JSON.parse(execSync("npm pack --json --dry-run", { encoding: "utf8" }))[0];
+            const raw = JSON.parse(execSync("npm pack --json --dry-run", { encoding: "utf8" }));
+            const packed = Array.isArray(raw) ? raw[0] : raw[Object.keys(raw)[0]];
             const code = packed.files.map((f) => f.path).filter((p) => /\.(ts|tsx|js|mjs)$/.test(p)).sort();
             const hash = createHash("sha256");
             for (const p of code) { hash.update(p); hash.update(readFileSync(p)); }
@@ -66,7 +67,6 @@ jobs:
             appendFileSync(process.env.GITHUB_OUTPUT, "hash=" + digest + "\n");
             appendFileSync(process.env.GITHUB_OUTPUT, "count=" + code.length + "\n");
           '
-
       - name: Read the fingerprint of the previous release
         id: previous
         run: |
