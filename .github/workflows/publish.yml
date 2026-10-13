@@ -16,6 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  id-token: write
   contents: write
 
 jobs:
@@ -31,6 +32,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org/
+
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
 
       - name: Resolve package name and version
         id: pkg
@@ -103,21 +107,9 @@ jobs:
         if: steps.decide.outputs.publish == 'true' && steps.decide.outputs.bump == 'yes'
         run: npm version patch --no-git-tag-version
 
-      - name: Verify credentials
+      - name: Publish to npm (OIDC, no token)
         if: steps.decide.outputs.publish == 'true'
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::NODE_AUTH_TOKEN is empty. Add NPM_TOKEN under Settings > Secrets and variables > Actions."
-            exit 1
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish to npm
-        if: steps.decide.outputs.publish == 'true'
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance
 
       - name: Commit the version bump and tag the release
         if: steps.decide.outputs.publish == 'true'
