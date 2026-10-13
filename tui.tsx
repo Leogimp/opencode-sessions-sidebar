@@ -5,8 +5,8 @@
  *    indicator stays below it. Rows: status icon + title, active session
  *    highlighted; click a row to switch to that session. A centered "+" row
  *    below the list creates a new session and switches to it.
- * 2. Owns the built-in top tab strip: setup sets cli.json `tabs.enabled:
- *    false`, keeps re-asserting that value while the plugin is active
+ * 2. Owns the built-in top tab strip: setup sets cli.json `tabs.mode:
+ *    "off"`, keeps re-asserting that value while the plugin is active
  *    (another OpenCode window exiting restores it — plugin cleanup runs on
  *    every TUI shutdown — and the settings dialog can re-enable it), and the
  *    cleanup returned from setup restores the previous value when the plugin
@@ -41,13 +41,52 @@ const PULSE_MIN = 0.15
 type Tab = { sessionID: string; title?: string }
 
 // --- Top strip ownership ----------------------------------------------------
-// While the plugin is enabled it owns `tabs.enabled`: setup turns the strip
+// While the plugin is enabled it owns `tabs.mode`: setup turns the strip
 // off (remembering the previous value in plugin storage) and the cleanup
 // function returned from setup restores it when the plugin is disabled or
 // unloaded. "never" means the plugin never flipped the value (it was already
 // off — e.g. set manually), so cleanup leaves it alone.
+//
+// `tabs.mode` ("auto" | "on" | "off") is the current setting; the older
+// `tabs.enabled` boolean is still accepted but is a legacy alias. The plugin
+// only ever writes `mode`, and drops `enabled` while it holds the strip, so
+// the two keys can never disagree. `previous` records both keys exactly as
+// they were, so cleanup restores the file to its original shape.
 
-type StripPref = { previous: "never" | "unset" | boolean }
+// "never": never flipped. "unset": no explicit setting before the plugin ran.
+type TabsSnapshot = { mode?: string; enabled?: boolean }
+type StripPref = { previous: "never" | "unset" | TabsSnapshot }
+
+// True when the configured tabs keys already resolve to "strip off".
+// `mode` wins when present; `enabled: false` is only consulted on its own.
+function tabsAreOff(tabs: any): boolean {
+  const mode = tabs?.mode
+  if (typeof mode === "string") return mode === "off"
+  return tabs?.enabled === false
+}
+
+// The tabs keys worth restoring, or "unset" when the user had none.
+function snapshotTabs(tabs: any): StripPref["previous"] {
+  const snap: TabsSnapshot = {}
+  if (typeof tabs?.mode === "string") snap.mode = tabs.mode
+  if (typeof tabs?.enabled === "boolean") snap.enabled = tabs.enabled
+  return Object.keys(snap).length === 0 ? "unset" : snap
+}
+
+// Previous plugin versions stored the raw `tabs.enabled` boolean here; read
+// that shape back so an upgrade still restores what it should.
+function readPref(value: unknown): StripPref["previous"] {
+  if (value === "never" || value === "unset") return value
+  if (typeof value === "boolean") return { enabled: value }
+  if (value && typeof value === "object") {
+    const { mode, enabled } = value as TabsSnapshot
+    const snap: TabsSnapshot = {}
+    if (typeof mode === "string") snap.mode = mode
+    if (typeof enabled === "boolean") snap.enabled = enabled
+    return Object.keys(snap).length === 0 ? "unset" : snap
+  }
+  return "unset"
+}
 
 // Resolves cli.json the way OpenCode does: $OPENCODE_CONFIG_DIR wins, then
 // $XDG_CONFIG_HOME/opencode, then ~/.config/opencode. The file may not exist
@@ -312,7 +351,7 @@ export default Plugin.define({
     })
     let prefWrite: Promise<unknown> | undefined
     // True while this activation owns the strip: setup flipped
-    // `tabs.enabled` (or claimed an already-off value written by an earlier
+    // `tabs.mode` (or claimed an already-off value written by an earlier
     // version) and the watcher below keeps it off.
     let owns = false
     let active = true
@@ -328,11 +367,11 @@ export default Plugin.define({
       })
     } else {
       const result = modifyCliJson((json) => {
-        const current = json.tabs?.enabled
-        if (current === false) {
+        const current = json.tabs
+        if (tabsAreOff(current)) {
           // Already off. Bootstrap the preference when this plugin wrote that
           // value in an earlier version and never stored it.
-          if ((prefStore as any).previous === "never") {
+          if (readPref((prefStore as any).previous) === "never") {
             owns = true
             prefWrite = setPref((draft: StripPref) => {
               draft.previous = "unset"
@@ -340,12 +379,13 @@ export default Plugin.define({
           }
           return false
         }
-        const previous = typeof current === "boolean" ? current : "unset"
         owns = true
         prefWrite = setPref((draft: StripPref) => {
-          draft.previous = previous
+          draft.previous = snapshotTabs(current)
         })
-        json.tabs = { ...(json.tabs ?? {}), enabled: false }
+        json.tabs = { ...(current ?? {}), mode: "off" }
+        // Never leave the legacy key contradicting the mode we just set.
+        delete json.tabs.enabled
         return true
       })
       if (result === "missing") {
@@ -355,7 +395,7 @@ export default Plugin.define({
           mkdirSync(dirname(file), { recursive: true })
           writeJsonAtomic(
             file,
-            JSON.stringify({ $schema: "https://opencode.ai/v2/cli.json", tabs: { enabled: false } }, null, 2) + "\n",
+            JSON.stringify({ $schema: "https://opencode.ai/v2/cli.json", tabs: { mode: "off" } }, null, 2) + "\n",
           )
           owns = true
           prefWrite = setPref((draft: StripPref) => {
@@ -365,13 +405,13 @@ export default Plugin.define({
       } else if (result === "unparsable") {
         context.ui.toast.show({
           title: "Sessions sidebar",
-          message: "Could not parse cli.json — hide the tab strip manually with tabs.enabled: false.",
+          message: 'Could not parse cli.json — hide the tab strip manually with tabs.mode: "off".',
           variant: "warning",
         })
       }
 
       // Keep owning the strip while active. Plugin cleanup also runs on TUI
-      // shutdown, so every other OpenCode window sees `tabs.enabled` restored
+      // shutdown, so every other OpenCode window sees `tabs.mode` restored
       // when one window exits — and every running TUI watches cli.json, so
       // re-writing the value re-hides the strip everywhere within ~150 ms.
       if (owns) {
@@ -383,9 +423,9 @@ export default Plugin.define({
             assertTimer = setTimeout(() => {
               if (!active || !owns) return
               modifyCliJson((json) => {
-                const current = json.tabs?.enabled
-                if (current === false) return false
-                json.tabs = { ...(json.tabs ?? {}), enabled: false }
+                if (tabsAreOff(json.tabs)) return false
+                json.tabs = { ...(json.tabs ?? {}), mode: "off" }
+                delete json.tabs.enabled
                 return true
               })
             }, 150)
@@ -412,12 +452,13 @@ export default Plugin.define({
       try {
         await prefWrite
       } catch {}
-      const previous = (prefStore as any).previous
-      if (previous === "never" || previous === undefined) return // plugin never flipped it
+      const previous = readPref((prefStore as any).previous)
+      if (previous === "never") return // plugin never flipped it
       modifyCliJson((json) => {
         const tabs = { ...(json.tabs ?? {}) }
-        if (previous === "unset") delete tabs.enabled
-        else tabs.enabled = previous
+        delete tabs.mode
+        delete tabs.enabled
+        if (previous !== "unset") Object.assign(tabs, previous)
         if (Object.keys(tabs).length === 0) delete json.tabs
         else json.tabs = tabs
         return true
