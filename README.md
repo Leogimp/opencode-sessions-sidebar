@@ -1,4 +1,4 @@
-# opencode-sessions-sidebar
+# @leogimp/opencode-sessions-sidebar
 
 [OpenCode](https://opencode.ai) TUI plugin that renders open sessions as a **Sessions** block at the bottom of the sidebar - click a row to switch sessions, `×` to close one - and replaces the built-in top tab strip. Fully reversible: disabling the plugin restores your tab strip.
 
