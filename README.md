@@ -26,7 +26,7 @@ This is a TUI (CLI-only) plugin, so it belongs in **`cli.json`** under the **`pl
 ### From npm (recommended)
 
 ```bash
-opencode plugin add @leo.gimp/opencode-sessions-sidebar
+opencode plugin add "@leo.gimp/opencode-sessions-sidebar"
 ```
 
 Or add it by hand to `~/.config/opencode/cli.json`:
