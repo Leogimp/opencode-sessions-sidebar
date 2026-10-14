@@ -57,7 +57,7 @@ Relative paths (`./plugins/sessions-sidebar`), `file://` URLs, and dropping the 
 ### Uninstall
 
 ```bash
-opencode plugin remove @leo.gimp/opencode-sessions-sidebar
+opencode plugin remove "@leo.gimp/opencode-sessions-sidebar"
 ```
 
 Or delete the entry from `cli.json`. Either way the cleanup runs, the Sessions block is unmounted, and the built-in tab strip is restored.
