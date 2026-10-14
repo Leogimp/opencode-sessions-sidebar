@@ -1,6 +1,6 @@
 {
   "name": "@leo.gimp/opencode-sessions-sidebar",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Renders open session tabs as a Sessions block at the bottom of the OpenCode sidebar",
   "license": "MIT",
   "author": {
