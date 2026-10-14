@@ -1,6 +1,6 @@
 # @leo.gimp/opencode-sessions-sidebar
 
-[OpenCode](https://opencode.ai) v2 TUI plugin that renders open sessions as a **Sessions** block at the bottom of the sidebar - click a row to switch sessions, `×` to close one - and replaces the built-in top tab strip. Fully reversible: disabling the plugin unmounts the block and gives you your tab strip back.
+[OpenCode](https://opencode.ai) v2 TUI plugin that renders open sessions as a **Sessions** block at the bottom of the sidebar - click a row to switch sessions, `×` to close one - and takes over the built-in top tab strip. While the plugin is installed, `tabs.mode` is forced to `"off"` in `cli.json`; uninstalling unmounts the block and releases the setting.
 
 <div align="center">
 
@@ -60,7 +60,7 @@ Relative paths (`./plugins/sessions-sidebar`), `file://` URLs, and dropping the 
 opencode plugin remove "@leo.gimp/opencode-sessions-sidebar"
 ```
 
-Or delete the entry from `cli.json`. Either way the cleanup runs, the Sessions block is unmounted, and the built-in tab strip is restored.
+Or delete the entry from `cli.json`. Either way the plugin stops enforcing its settings and the Sessions block is unmounted. Because the plugin forces `tabs.mode: "off"` for as long as it is installed - deliberately not restoring anything while it runs - set **Mode** back (Settings → Tabs → Mode) after uninstalling if you want the built-in strip again.
 
 To turn the plugin off temporarily without uninstalling it, prefix its id with `-` (`opencode plugin list` shows the ids in use):
 
@@ -109,22 +109,23 @@ subagent family:
 
 ### Tab strip ownership
 
-While the plugin is enabled it hides the built-in top tab strip by setting
-`tabs.mode: "off"` in `cli.json` (session tracking moves into the
-plugin, because the built-in tab store stops tracking once the strip is disabled):
+While the plugin is **installed**, the built-in top tab strip stays forced off:
+it sets `tabs.mode: "off"` in `cli.json` (session tracking moves into the
+plugin, because the built-in tab store stops tracking once the strip is
+disabled), and it keeps that setting locked for as long as the plugin stays
+installed:
 
-- The previous `tabs` setting is remembered in plugin storage
-- While the plugin is running it **keeps re-asserting** `tabs.mode: "off"` by
-  watching the config file - plugin cleanup also runs when any OpenCode window
-  exits, which would otherwise re-enable the strip in every window that is
-  still open
-- Disabling or removing the plugin **restores the strip** automatically, putting
-  `tabs` back exactly as it was - including sibling keys like `layout` and `scope`
-- The plugin writes `mode` and deletes the legacy `enabled` boolean while it holds
-  the strip, so the two can never disagree. If the strip was *already* off when the
-  plugin started, it assumes an earlier install of itself turned it off, records
-  "no explicit setting", and cleanup drops the key so the strip returns to
-  OpenCode's `auto` default
+- **Forced off all the time** - the value is not temporarily flipped and
+  restored on exit; it stays `"off"` across restarts, so Settings always
+  shows Tabs → Mode: **off**
+- If the setting is changed while the plugin runs - e.g. toggled in the
+  settings dialog - the plugin re-asserts `"off"` by watching the config
+  file; the TUI re-reads `cli.json` on every file change, so the change snaps
+  back within ~150 ms
+- Only **uninstalling** the plugin releases the lock - re-enable the strip in
+  Settings (Tabs → Mode) at that point
+- The plugin writes `mode` and deletes the legacy `enabled` boolean, so the
+  two keys can never disagree
 - `cli.json` is resolved like OpenCode does (`OPENCODE_CONFIG_DIR`, then
   `XDG_CONFIG_HOME`, then `~/.config/opencode`) and is created when missing;
   writes are atomic (temp + rename). If the file cannot be parsed (e.g. JSONC
@@ -137,10 +138,11 @@ plugin, because the built-in tab store stops tracking once the strip is disabled
 - `index.ts` is a deliberate no-op so the server-side plugin loader resolves the
   package cleanly without pulling TUI-only dependencies into the server module
   map - all rendering lives in `tui.tsx`, which is what the `./tui` export loads.
-- `@opencode/plugin`, `@opentui/core` and `solid-js` are declared as real
-  dependencies so the bare specifiers resolve inside OpenCode's plugin install
-  cache. `@opentui/solid` is a dev dependency: `tui.tsx` only references it as
-  a `@jsxImportSource` pragma, and the host supplies the JSX runtime at runtime.
+- `@opencode/plugin`, `@opentui/core`, `@opentui/solid` and `solid-js` are
+  declared as real dependencies so the bare specifiers resolve inside
+  OpenCode's plugin install cache. The header comment in `tui.tsx` mentions
+  `@opentui/solid` only as a `@jsxImportSource` pragma, but the JSX runtime
+  must still be importable by name in the installed cache.
 - `solid-js` tracks `^1.9.15` - what the OpenCode TUI is built against - rather
   than the exact `1.9.12` that `@opentui/solid` still peers on, which would
   pull a `seroval` with four unfixed critical advisories. npm is strict about
