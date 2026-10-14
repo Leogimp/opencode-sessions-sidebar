@@ -1,6 +1,6 @@
 {
   "name": "@leo.gimp/opencode-sessions-sidebar",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Renders open session tabs as a Sessions block at the bottom of the OpenCode sidebar",
   "license": "MIT",
   "author": {
@@ -40,10 +40,10 @@
   "dependencies": {
     "@opencode/plugin": "^2.0.10",
     "@opentui/core": "^0.6.3",
+    "@opentui/solid": "^0.6.3",
     "solid-js": "^1.9.15"
   },
   "devDependencies": {
-    "@opentui/solid": "^0.6.3",
     "typescript": "^5.8.2"
   }
 }

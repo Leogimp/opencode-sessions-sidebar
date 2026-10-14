@@ -62,7 +62,7 @@ jobs:
             const { readFileSync, appendFileSync } = require("fs");
             const raw = JSON.parse(execSync("npm pack --json --dry-run", { encoding: "utf8" }));
             const packed = Array.isArray(raw) ? raw[0] : raw[Object.keys(raw)[0]];
-            const code = packed.files.map((f) => f.path).filter((p) => /\.(ts|tsx|js|mjs)$/.test(p)).sort();
+            const code = ["package.json"].concat(packed.files.map((f) => f.path)).filter((p) => (p === "package.json" || /\.(ts|tsx|js|mjs)$/.test(p))).sort();
             const hash = createHash("sha256");
             for (const p of code) { hash.update(p); hash.update(readFileSync(p)); }
             const digest = hash.digest("hex");
