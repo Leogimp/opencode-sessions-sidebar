@@ -111,9 +111,21 @@ jobs:
         if: steps.decide.outputs.publish == 'true' && steps.decide.outputs.bump == 'yes'
         run: npm version patch --no-git-tag-version
 
-      - name: Publish to npm (OIDC, no token)
+      - name: Verify credentials
+        if: steps.decide.outputs.publish == 'true'
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NODE_AUTH_TOKEN is empty. Add NPM_TOKEN under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm
         if: steps.decide.outputs.publish == 'true'
         run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Commit the version bump and tag the release
         if: steps.decide.outputs.publish == 'true'
