@@ -16,7 +16,7 @@
  */
 /** @jsxImportSource @opentui/solid */
 import { createEffect, createSignal, onCleanup, untrack } from "solid-js"
-import { RGBA } from "@opentui/core"
+import { RGBA, TextAttributes } from "@opentui/core"
 import {
   existsSync,
   mkdirSync,
@@ -309,7 +309,7 @@ function SessionsBlock(props: any) {
             </text>
             <text
               fg={active ? theme().text.base : theme().text.muted}
-              attributes={active ? { bold: true } : undefined}
+              attributes={active ? TextAttributes.BOLD : undefined}
               wrapMode="none"
               flexGrow={1}
               flexShrink={1}
