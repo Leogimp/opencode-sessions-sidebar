@@ -337,17 +337,40 @@ function SessionsBlock(props: any) {
   // store implements with its cancelled-tabs set).
   const deleted = new Set<string>()
 
+  // Locally closed rows ("×"). The storage file lock is a retry loop with
+  // jittered backoff, so pending mutations do NOT apply in queue order: an
+  // append queued at creation time can acquire the lock AFTER a close's
+  // removal and re-add the session that was just closed. Marking the id
+  // here — synchronously, before the removal is even queued — and
+  // re-checking the mark INSIDE every append mutation (at application
+  // time, under the lock) makes any late-landing append a no-op.
+  // Navigating to the session again clears the mark, so reopening works.
+  const cancelled = new Set<string>()
+
+  // One append per id in flight: the route effect and the title effect can
+  // both queue an append for a brand-new session back-to-back. Each
+  // mutation is a lock round-trip plus an unconditional disk write, so
+  // coalescing removes the duplicate-write churn that opens the
+  // close/append race window in the first place.
+  const appendInFlight = new Set<string>()
+
   // Idempotent append. The duplicate check runs against the draft the
   // storage layer just read from disk under its file lock — not against the
   // possibly stale local snapshot — so an append racing a cross-window
-  // append of the same session, or landing after a removal, is a no-op
-  // instead of producing duplicate or resurrected rows. Eviction keeps the
-  // newest MAX_TABS rows, never the active one; newest session lands at
-  // the bottom.
+  // append of the same session is a no-op instead of a duplicate. Eviction
+  // keeps the newest MAX_TABS rows, never the active one; newest session
+  // lands at the bottom.
   const appendTab = (id: string) => {
+    if (cancelled.has(id) || deleted.has(id)) return
+    if (appendInFlight.has(id)) return
+    appendInFlight.add(id)
     const active = activeId()
     const info = ctx.data.session.get(id)
-    update((draft: any) => {
+    const op = setStore((draft: any) => {
+      // Application time, under the lock: this is the only place the
+      // close/append race can be observed, so re-check here.
+      appendInFlight.delete(id)
+      if (cancelled.has(id) || deleted.has(id)) return
       const list: Tab[] = draft.sessions ?? []
       if (list.some((t: Tab) => t.sessionID === id)) return
       let rest = list
@@ -363,15 +386,24 @@ function SessionsBlock(props: any) {
       }
       draft.sessions = [...rest, { sessionID: id, title: info?.title, created: info?.time?.created ?? Date.now() }]
     })
+    void op.catch((error: unknown) => {
+      // Failed lock/write: drop the in-flight mark so a later navigation
+      // can retry the append.
+      appendInFlight.delete(id)
+      console.error("[sessions-sidebar] failed to persist tabs", error)
+    })
   }
 
   // Capture navigation once per route change. Tracking is append-only: a
   // session keeps its row position once opened, so rows never shuffle.
+  // Landing on a session clears its close mark: navigating to it is an
+  // explicit (re)open, so the session is admissible again.
   createEffect(() => {
     const r = route()
     if (!r || r.type !== "session") return
     untrack(() => {
       const root = ctx.data.session.root(r.sessionID) as string
+      cancelled.delete(root)
       if (deleted.has(root)) return
       appendTab(root)
     })
@@ -404,22 +436,21 @@ function SessionsBlock(props: any) {
   // Deleted sessions leave the list, no matter which window (or client)
   // deleted them: `session.deleted` is a durable server event delivered to
   // every connected TUI. Mirrors the built-in strip's prune: remove the row,
-  // and if it was the session being viewed, switch to the neighbouring
-  // session (or home when the list is empty).
+  // and if it was the session being viewed, switch to the most recently
+  // opened session still open (or home when the list is empty).
   onCleanup(
     ctx.data.on("session.deleted", (event: any) => {
       const id = event.data.sessionID as string
       deleted.add(id)
       untrack(() => {
         const list = entries()
-        const idx = list.findIndex((t: Tab) => t.sessionID === id)
-        if (idx === -1) return
+        if (!list.some((t: Tab) => t.sessionID === id)) return
         update((draft: any) => {
           draft.sessions = (draft.sessions ?? []).filter((t: Tab) => t.sessionID !== id)
         })
         if (activeId() === id) {
           const remaining = list.filter((t: Tab) => t.sessionID !== id)
-          const next = remaining[idx] ?? remaining[idx - 1]
+          const next = remaining[remaining.length - 1]
           ctx.ui.router.navigate(next ? { type: "session", sessionID: next.sessionID } : { type: "home" })
         }
       })
@@ -428,11 +459,14 @@ function SessionsBlock(props: any) {
 
   // Keep the persisted fallback title fresh for renamed sessions even while
   // they are not the active one, so rows restored after a restart show the
-  // current title.
+  // current title. Every storage update is a lock round-trip plus a disk
+  // write, so skip rows that are not tracked or already carry the title.
   onCleanup(
     ctx.data.on("session.renamed", (event: any) => {
       const { sessionID, title } = event.data
       untrack(() => {
+        const entry = entries().find((t: Tab) => t.sessionID === sessionID)
+        if (!entry || (entry.title ?? undefined) === title) return
         update((draft: any) => {
           const d = (draft.sessions ?? []).find((t: Tab) => t.sessionID === sessionID)
           if (d) d.title = title
@@ -512,14 +546,19 @@ function SessionsBlock(props: any) {
   }
 
   // Remove a session row ("×"). Closing the active session switches to the
-  // next remaining session (or home when the list is empty) — the session
-  // itself stays in the history, exactly like the old tab strip's close.
-  // Closed rows are remembered so ctrl+shift+t can reopen them.
+  // most recently opened session that is still open (the list is in open
+  // order, so that is the last remaining row), or home when the list is
+  // empty — the session itself stays in the history, exactly like the old
+  // tab strip's close. Closed rows are remembered so ctrl+shift+t can
+  // reopen them. The id is marked BEFORE the removal is queued: pending
+  // storage mutations do not apply in queue order, so a late-landing append
+  // must see the mark and no-op instead of resurrecting the row.
   const closedStack: Tab[] = []
   const closeSession = (id: string) => {
     const list = entries()
     const idx = list.findIndex((t: Tab) => t.sessionID === id)
     if (idx === -1) return
+    cancelled.add(id)
     closedStack.push(list[idx]!)
     if (closedStack.length > MAX_TABS) closedStack.shift()
     update((draft: any) => {
@@ -527,7 +566,7 @@ function SessionsBlock(props: any) {
     })
     if (id === activeId()) {
       const remaining = list.filter((t: Tab) => t.sessionID !== id)
-      const next = remaining[idx] ?? remaining[idx - 1]
+      const next = remaining[remaining.length - 1]
       if (next) ctx.ui.router.navigate({ type: "session", sessionID: next.sessionID })
       else ctx.ui.router.navigate({ type: "home" })
     }

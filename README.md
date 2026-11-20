@@ -89,11 +89,13 @@ above the built-in footer directory indicator:
 - One row per session: **status icon + title**, the active session highlighted in bold
 - **Click a row to switch** to that session, click **`×`** to remove it from the list
 - A **`+ New session`** row creates a new session and switches to it
-- Closing the active session switches to the next remaining session (or home when the
-  list is empty) - the session itself stays in the history, exactly like the old tab strip's close
+- Closing the active session switches to the **most recently opened** session that is still
+  open (or home when the list is empty) - the session itself stays in the history, exactly
+  like the old tab strip's close
 - Deleting a session (from the session manager, another window, or the CLI) **removes its
-  row immediately**; if it was the session being viewed, the view switches to the
-  neighbouring session
+  row immediately** and switches to the most recently opened session still open; closing
+  ("×") and re-opening race-free - a close marks the session so any in-flight registration
+  from the same or another window lands as a no-op instead of resurrecting the row
 - Tracks up to **10 sessions**, newest at the bottom; the order is append-only, so rows
   never shuffle while you work, and the active session is never evicted by the cap
 - The list is **live-synced across every open window** - appends and removals are
