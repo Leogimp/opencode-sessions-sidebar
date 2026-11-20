@@ -1,6 +1,6 @@
 # @leo.gimp/opencode-sessions-sidebar
 
-[OpenCode](https://opencode.ai) v2 TUI plugin that renders open sessions as a **Sessions** block at the bottom of the sidebar - click a row to switch sessions, `×` to close one - and takes over the built-in top tab strip. While the plugin is installed, `tabs.mode` is forced to `"off"` in `cli.json`; uninstalling unmounts the block and releases the setting.
+[OpenCode](https://opencode.ai) v2 TUI plugin that renders open sessions as a **Sessions** block at the bottom of the sidebar - click a row to switch sessions, `×` to close one, or switch with the keyboard (`ctrl+tab` / `ctrl+shift+tab` / `ctrl+1..0`) - and takes over the built-in top tab strip. While the plugin is installed, `tabs.mode` is forced to `"off"` in `cli.json`; uninstalling unmounts the block and releases the setting.
 
 <div align="center">
 
@@ -88,24 +88,45 @@ above the built-in footer directory indicator:
 
 - One row per session: **status icon + title**, the active session highlighted in bold
 - **Click a row to switch** to that session, click **`×`** to remove it from the list
-- A centred **`+`** row creates a new session and switches to it
+- A **`+ New session`** row creates a new session and switches to it
 - Closing the active session switches to the next remaining session (or home when the
   list is empty) - the session itself stays in the history, exactly like the old tab strip's close
+- Deleting a session (from the session manager, another window, or the CLI) **removes its
+  row immediately**; if it was the session being viewed, the view switches to the
+  neighbouring session
 - Tracks up to **10 sessions**, newest at the bottom; the order is append-only, so rows
-  never shuffle while you work
-- Session titles persist in the plugin's store, so they survive data eviction
+  never shuffle while you work, and the active session is never evicted by the cap
+- The list is **live-synced across every open window** - appends and removals are
+  computed against the persisted state under a file lock, so two windows can never
+  duplicate or drop each other's rows
+- Session titles persist in the plugin's store (kept fresh via rename events), so they
+  survive data eviction; untitled sessions render as `New session · 3m`-style labels
+
+### Keyboard
+
+The built-in strip's keymap dies with the strip, so the plugin re-binds the same
+keys to its own list (all commands also appear in the palette under **Sessions**):
+
+| Keys | Action |
+| --- | --- |
+| `ctrl+tab` / `ctrl+shift+tab` | Next / previous session |
+| `ctrl+1` … `ctrl+0` | Open session 1 … 10 |
+| `<leader>w` | Close the current session |
+| `ctrl+shift+t` | Reopen the last closed session |
 
 ### Status indicators
 
 Each row's icon mirrors the built-in tab strip logic, across the session and its whole
-subagent family:
+subagent family - distinct shapes, not just colors, so they stay readable on any
+terminal:
 
-- **Busy** - a dot that gently breathes (smooth cosine pulse) while the agent is
-  responding or has pending work; static when `animations` is set to `false` in
-  `cli.json` (read once at startup)
-- **Attention** - a warning-coloured triangle when the session has pending
-  permissions or questions
-- **Idle** - a plain dot otherwise
+- **`!`** - a permission prompt is waiting (warning colour)
+- **`?`** - a question form is waiting (warning colour)
+- **`●`** - busy: breathing (smooth cosine pulse) while the agent is responding or has
+  pending work; static when `animations` is set to `false` in `cli.json` (read once at
+  startup)
+- **`•`** - unread: the session finished working after you last looked at it
+- **`○`** - idle
 
 ### Tab strip ownership
 
@@ -134,7 +155,8 @@ installed:
 ## Notes
 
 - The sidebar row width is fixed by OpenCode's sidebar layout; long titles are
-  clipped with a trailing ellipsis.
+  clipped with a trailing ellipsis, counting terminal display columns so
+  CJK/emoji titles cannot overflow the row.
 - `index.ts` is a deliberate no-op so the server-side plugin loader resolves the
   package cleanly without pulling TUI-only dependencies into the server module
   map - all rendering lives in `tui.tsx`, which is what the `./tui` export loads.
